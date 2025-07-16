@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Danmaku Kick Chat Mejorado</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      overflow: hidden;
+      background: transparent;
+      height: 100vh;
+      width: 100vw;
+    }
+    .msg {
+      position: absolute;
+      white-space: nowrap;
+      font-size: 24px;
+      color: white;
+      text-shadow: 2px 2px 4px black;
+      animation: fly 10s linear forwards;
+      pointer-events: none;
+    }
+    @keyframes fly {
+      0% { transform: translateX(100vw); }
+      100% { transform: translateX(-100%); }
+    }
+  </style>
+</head>
+<body>
+  <div id="container"></div>
+
+  <script>
+    class KickClient {
+      constructor(channel, callbacks = {}) {
+        this.channel = channel;
+        this.callbacks = callbacks;
+        this.ws = null;
+        this.roomId = null;
+      }
+
+      async connect() {
+        try {
+          const res = await fetch(`https://kick.com/api/v1/channels/${this.channel}`);
+          if(!res.ok) throw new Error("No se pudo obtener el canal");
+          const data = await res.json();
+          this.roomId = data.chatroom.id;
+          console.log("Room ID:", this.roomId);
+        } catch(e) {
+          console.error("Error al obtener el canal:", e);
+          return;
+        }
+
+        this.ws = new WebSocket("wss://chat.kick.com/socket.io/?EIO=4&transport=websocket");
+
+        this.ws.onopen = () => {
+          console.log("WebSocket abierto");
+          this.ws.send("40"); 
+          setTimeout(() => {
+            this.ws.send(`42["join_room",{"room":"${this.roomId}"}]`);
+            if (this.callbacks.ready) this.callbacks.ready();
+          }, 1000);
+        };
+
+        this.ws.onmessage = (event) => {
+          if (event.data.startsWith("42")) {
+            try {
+              const payload = JSON.parse(event.data.slice(2));
+              if (payload[0] === "chat_message" && this.callbacks.ChatMessage) {
+                this.callbacks.ChatMessage(payload[1]);
+              }
+            } catch(e) {
+              console.error("Error procesando mensaje:", e);
+            }
+          }
+        };
+
+        this.ws.onerror = (e) => console.error("WebSocket error:", e);
+        this.ws.onclose = () => console.log("WebSocket cerrado");
+      }
+    }
+
+    // Limitar máximo mensajes en pantalla para evitar saturar
+    const MAX_MSGS = 15;
+    const container = document.getElementById("container");
+
+    function showDanmaku(msg) {
+      if(container.children.length >= MAX_MSGS) {
+        // Si hay muchos mensajes, no añadimos más (o podrías quitar el más viejo)
+        return;
+      }
+
+      const el = document.createElement("div");
+      el.className = "msg";
+      el.innerText = `${msg.sender.username}: ${msg.content}`;
+      el.style.top = `${Math.random() * 90}%`;
+      container.appendChild(el);
+
+      // Borrar mensaje después de 10 segundos
+      setTimeout(() => {
+        if(el.parentNode) el.parentNode.removeChild(el);
+      }, 10000);
+    }
+
+    // Conectar al chat
+    const client = new KickClient("bryancin", {
+      ready: () => {
+        console.log("✅ Conectado a Kick");
+
+        // Mensaje de prueba para verificar funcionamiento
+        showDanmaku({ sender: { username: "Sistema" }, content: "¡Overlay danmaku activo!" });
+      },
+      ChatMessage: (msg) => {
+        console.log("Nuevo mensaje:", msg);
+        showDanmaku(msg);
+      }
+    });
+    client.connect();
+
+  </script>
+</body>
+</html>
